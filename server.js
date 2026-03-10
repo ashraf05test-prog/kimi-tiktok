@@ -221,21 +221,6 @@ function runYtDlp(task, outputPath) {
   return new Promise((resolve, reject) => {
     const args = [
       '--no-warnings',
-      '--format', 'bestvideo+bestaudio/best',
-      '--merge-output-format', 'mp4',
-      '--concurrent-fragments', '10',
-      '--buffer-size', '16K',
-      '--http-chunk-size', '10M',
-      '--retries', '10',
-      '--fragment-retries', '10',
-      '--ffmpeg-location', '/usr/bin/ffmpeg',
-      '--postprocessor-args', 'ffmpeg:-c:v copy -c:a aac',
-      '-o', outputPath,
-      task.m3u8Url,
-    ];
-
-    const args = [
-      '--no-warnings',
       '--format', 'best[ext=mp4]/best',
       '--concurrent-fragments', '10',
       '--retries', '10',
