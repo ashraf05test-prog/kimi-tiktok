@@ -204,9 +204,14 @@ function runFFmpegDirect(task, outputPath, subPath) {
       vfFilter = 'scale=1280:720';
     }
 
+    // Extract referer from m3u8 URL domain
+    const urlObj = new URL(task.m3u8Url);
+    const referer = urlObj.origin + '/';
+
     const args = [
       '-y',
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      '-headers', `Referer: ${referer}\r\nOrigin: ${urlObj.origin}\r\n`,
       '-i', task.m3u8Url,
     ];
 
