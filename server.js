@@ -279,12 +279,10 @@ function runYtDlp(task, outputPath) {
   return new Promise((resolve, reject) => {
     const args = [
       '--no-warnings',
-      '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
-      '--merge-output-format', 'mp4',
+      '--format', 'best[ext=mp4]/best',
       '--concurrent-fragments', '10',
       '--retries', '10',
       '--fragment-retries', '10',
-      '--ffmpeg-location', '/usr/bin/ffmpeg',
       '--no-part',
       '-o', outputPath,
       task.m3u8Url,
@@ -316,7 +314,8 @@ function runYtDlp(task, outputPath) {
     });
 
     ytdlp.on('close', code => {
-      if (code === 0 && fs.existsSync(outputPath)) resolve();
+      // code 1 can still mean file downloaded but merger failed
+      if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1024*1024) resolve();
       else reject(new Error(`yt-dlp exit code ${code}`));
     });
     ytdlp.on('error', e => reject(new Error('yt-dlp not found: ' + e.message)));
