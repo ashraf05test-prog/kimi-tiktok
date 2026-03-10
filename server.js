@@ -236,8 +236,7 @@ function runYtDlp(task, outputPath) {
 
     const args = [
       '--no-warnings',
-      '--format', 'bestvideo+bestaudio/best',
-      '--merge-output-format', 'mp4',
+      '--format', 'best[ext=mp4]/best',
       '--concurrent-fragments', '10',
       '--retries', '10',
       '--fragment-retries', '10',
