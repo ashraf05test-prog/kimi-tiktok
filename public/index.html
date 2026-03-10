@@ -136,6 +136,54 @@ h1{font-size:20px;font-weight:700;background:linear-gradient(135deg,#a5b4fc,#e87
         <textarea id="caption" placeholder="#kdrama #বাংলা_সাব"></textarea>
       </div>
 
+      <!-- Subtitle Settings -->
+      <div class="field" id="subSettings" style="display:none">
+        <label>🎨 Subtitle Settings</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          <div>
+            <div style="font-size:11px;color:#aaa;margin-bottom:4px">Font Size</div>
+            <select id="subFontSize" style="width:100%;background:#1a1a2e;color:#fff;border:1px solid #333;border-radius:8px;padding:8px">
+              <option value="18">Small (18)</option>
+              <option value="22" selected>Medium (22)</option>
+              <option value="28">Large (28)</option>
+              <option value="34">XLarge (34)</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#aaa;margin-bottom:4px">Color</div>
+            <select id="subColor" style="width:100%;background:#1a1a2e;color:#fff;border:1px solid #333;border-radius:8px;padding:8px">
+              <option value="white" selected>White</option>
+              <option value="yellow">Yellow</option>
+              <option value="cyan">Cyan</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#aaa;margin-bottom:4px">Background</div>
+            <select id="subBg" style="width:100%;background:#1a1a2e;color:#fff;border:1px solid #333;border-radius:8px;padding:8px">
+              <option value="semi" selected>Semi-transparent</option>
+              <option value="black">Solid Black</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#aaa;margin-bottom:4px">Position</div>
+            <select id="subPosition" style="width:100%;background:#1a1a2e;color:#fff;border:1px solid #333;border-radius:8px;padding:8px">
+              <option value="bottom" selected>Bottom</option>
+              <option value="middle">Middle</option>
+              <option value="top">Top</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="subBold"> Bold
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="subItalic"> Italic
+          </label>
+        </div>
+      </div>
+
       <div class="toggle-row">
         <span>Compress (720p, ছোট size)</span>
         <button class="toggle" id="compressToggle" onclick="this.classList.toggle('on')"></button>
@@ -281,6 +329,7 @@ subDrop.addEventListener('drop', e => {
 });
 
 function handleSub(input) {
+  document.getElementById('subSettings').style.display = input.files[0] ? 'block' : 'none';
   if (input.files[0]) {
     document.getElementById('subName').textContent = '✓ ' + input.files[0].name;
     subDrop._file = input.files[0];
@@ -313,6 +362,12 @@ async function addTask() {
     fd.append('phone', phone);
     fd.append('channelUsername', channelUsername);
     fd.append('compress', document.getElementById('compressToggle').classList.contains('on'));
+    fd.append('subFontSize', document.getElementById('subFontSize').value);
+    fd.append('subColor', document.getElementById('subColor').value);
+    fd.append('subBg', document.getElementById('subBg').value);
+    fd.append('subPosition', document.getElementById('subPosition').value);
+    fd.append('subBold', document.getElementById('subBold').checked);
+    fd.append('subItalic', document.getElementById('subItalic').checked);
     if (subDrop._file) fd.append('subtitle', subDrop._file, subDrop._file.name);
 
     const r = await fetch('/api/queue/add', { method: 'POST', body: fd });
