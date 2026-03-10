@@ -215,6 +215,8 @@ function runFFmpegDirect(task, outputPath, subPath) {
       '-y',
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       '-headers', `Referer: ${referer}\r\nOrigin: ${urlObj.origin}\r\n`,
+      '-allowed_extensions', 'ALL',
+      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
     ];
     if (hasCookies) {
       args.push('-cookies', fs.readFileSync(cookiePath, 'utf8'));
