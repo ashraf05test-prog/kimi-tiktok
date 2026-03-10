@@ -225,6 +225,8 @@ function runYtDlp(task, outputPath) {
       '--http-chunk-size', '10M',
       '--retries', '10',
       '--fragment-retries', '10',
+      '--ffmpeg-location', '/usr/bin/ffmpeg',
+      '--postprocessor-args', 'ffmpeg:-c:v copy -c:a aac',
       '-o', outputPath,
       task.m3u8Url,
     ];
