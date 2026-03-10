@@ -208,19 +208,25 @@ function runFFmpegDirect(task, outputPath, subPath) {
     const urlObj = new URL(task.m3u8Url);
     const referer = urlObj.origin + '/';
 
+    const cookiePath = '/app/temp/cookies.txt';
+    const hasCookies = fs.existsSync(cookiePath);
+
     const args = [
       '-y',
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       '-headers', `Referer: ${referer}\r\nOrigin: ${urlObj.origin}\r\n`,
-      '-i', task.m3u8Url,
     ];
+    if (hasCookies) {
+      args.push('-cookies', fs.readFileSync(cookiePath, 'utf8'));
+    }
+    args.push('-i', task.m3u8Url);
 
     if (vfFilter) {
       args.push('-vf', vfFilter, '-c:v', 'libx264', '-preset', 'fast', '-crf', task.compress ? '28' : '23');
     } else {
       args.push('-c:v', 'copy');
     }
-    args.push('-map', '0', '-c:a', 'aac', '-max_muxing_queue_size', '1024', outputPath);
+    args.push('-c:a', 'aac', '-max_muxing_queue_size', '1024', outputPath);
 
     log(task.id, `▶ ffmpeg ${vfFilter ? 'burn+encode' : 'stream copy'}`);
     log(task.id, `▶ CMD: ffmpeg ${args.join(' ')}`);
@@ -283,10 +289,11 @@ function runYtDlp(task, outputPath) {
   return new Promise((resolve, reject) => {
     const args = [
       '--no-warnings',
-      '--format', 'best[ext=mp4]/best',
-      '--concurrent-fragments', '10',
+      '--format', 'worstvideo+worstaudio/worst/best',
+      '--concurrent-fragments', '5',
       '--retries', '10',
       '--fragment-retries', '10',
+      '--hls-use-mpegts',
       '--no-part',
       '-o', outputPath,
       task.m3u8Url,
