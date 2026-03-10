@@ -51,8 +51,11 @@ function log(taskId, msg, level = 'info') {
   const task = queue.find(t => t.id === taskId);
   if (task) {
     if (!task.logs) task.logs = [];
+    // Keep max 200 logs per task
+    if (task.logs.length > 200) task.logs = task.logs.slice(-150);
     task.logs.push(entry);
-    saveQueue();
+    // Don't save to disk every single log — too slow
+    if (task.logs.length % 10 === 0) saveQueue();
   }
   console.log(`[${taskId}] ${msg}`);
   broadcast({ type: 'log', taskId, ...entry });
@@ -231,12 +234,38 @@ function runYtDlp(task, outputPath) {
       task.m3u8Url,
     ];
 
-    log(task.id, '▶ yt-dlp ' + args.join(' ').substring(0, 80) + '...');
+    const args = [
+      '--no-warnings',
+      '--format', 'bestvideo+bestaudio/best',
+      '--merge-output-format', 'mp4',
+      '--concurrent-fragments', '10',
+      '--retries', '10',
+      '--fragment-retries', '10',
+      '--ffmpeg-location', '/usr/bin/ffmpeg',
+      '-o', outputPath,
+      task.m3u8Url,
+    ];
+
+    log(task.id, '⬇️ yt-dlp downloading...');
     const ytdlp = spawn('yt-dlp', args);
+    let lastLogPct = -1;
 
     ytdlp.stdout.on('data', data => {
       const line = data.toString().trim();
-      if (line) log(task.id, line);
+      if (!line) return;
+      // Only log every 10% to avoid freeze
+      const pctMatch = line.match(/(\d+\.\d+)%/);
+      if (pctMatch) {
+        const pct = Math.floor(parseFloat(pctMatch[1]) / 10) * 10;
+        if (pct !== lastLogPct) {
+          lastLogPct = pct;
+          const etaMatch = line.match(/ETA\s+(\S+)/);
+          log(task.id, `⬇️ ${pct}%${etaMatch ? ' ETA ' + etaMatch[1] : ''}`);
+          setStatus(task.id, 'processing', { progress: Math.floor(pct * 0.45) });
+        }
+      } else if (!line.includes('[download]')) {
+        log(task.id, line);
+      }
     });
 
     ytdlp.stderr.on('data', data => {
