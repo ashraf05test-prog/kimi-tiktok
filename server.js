@@ -154,9 +154,8 @@ async function processTask(task) {
       fs.renameSync(task.subFile.path, subPath);
     }
 
-    // Always try yt-dlp first (handles HLS/m3u8 best)
-    // Fall back to ffmpeg direct if yt-dlp fails
-    const isM3u8 = false; // force yt-dlp path
+    // m3u8 → ffmpeg direct, other → yt-dlp
+    const isM3u8 = task.m3u8Url.includes('.m3u8') || task.m3u8Url.includes('m3u8');
 
     if (isM3u8) {
       log(task.id, '🔥 m3u8 direct burn শুরু...');
