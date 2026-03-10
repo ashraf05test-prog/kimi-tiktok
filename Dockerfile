@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install telethon --break-system-packages
+RUN pip3 install telethon yt-dlp --break-system-packages
 
 WORKDIR /app
 COPY package*.json ./
