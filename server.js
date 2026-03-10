@@ -89,6 +89,12 @@ app.post('/api/queue/add', upload.single('subtitle'), (req, res) => {
     m3u8Url, title: title || 'Episode', caption: caption || '',
     apiId, apiHash, phone, channelUsername,
     compress: compress === 'true',
+    subFontSize: parseInt(req.body.subFontSize || '22'),
+    subColor: req.body.subColor || 'white',
+    subBg: req.body.subBg || 'semi',
+    subPosition: req.body.subPosition || 'bottom',
+    subBold: req.body.subBold === 'true',
+    subItalic: req.body.subItalic === 'true',
     subFile: req.file ? { path: req.file.path, name: req.file.originalname } : null,
     status: 'pending', progress: 0, logs: [],
     createdAt: new Date().toISOString(),
@@ -152,6 +158,14 @@ async function processTask(task) {
       const ext = task.subFile.name.split('.').pop().toLowerCase();
       subPath = task.subFile.path + '.' + ext;
       fs.renameSync(task.subFile.path, subPath);
+
+      // Convert SRT/VTT → ASS for proper Bengali font rendering
+      if (ext === 'srt' || ext === 'vtt') {
+        const assPath = subPath + '.ass';
+        await convertToAss(subPath, assPath, task);
+        subPath = assPath;
+        log(task.id, '✅ Subtitle → ASS converted');
+      }
     }
 
     // m3u8 → ffmpeg direct, other → yt-dlp
@@ -196,31 +210,20 @@ function runFFmpegDirect(task, outputPath, subPath) {
     if (subPath) {
       const esc = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
       const ext = path.extname(subPath).toLowerCase();
-      const subStr = ext === '.ass'
-        ? `ass='${esc}'`
-        : `subtitles='${esc}':force_style='FontName=Noto Sans Bengali,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,MarginV=25'`;
+      const subStr = `ass='${esc}':fontsdir=/tmp/fonts/`;
       vfFilter = task.compress ? `scale=1280:720,${subStr}` : subStr;
     } else if (task.compress) {
       vfFilter = 'scale=1280:720';
     }
 
-    // Extract referer from m3u8 URL domain
-    const urlObj = new URL(task.m3u8Url);
-    const referer = urlObj.origin + '/';
-
-    const cookiePath = '/app/temp/cookies.txt';
-    const hasCookies = fs.existsSync(cookiePath);
-
     const args = [
       '-y',
-      '-allowed_extensions', 'ALL',
-      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,hls',
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       '-i', task.m3u8Url,
     ];
 
     if (vfFilter) {
-      args.push('-vf', vfFilter, '-c:v', 'libx264', '-preset', 'fast', '-crf', task.compress ? '28' : '23');
+      args.push('-vf', vfFilter, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', task.compress ? '28' : '23', '-threads', '0');
     } else {
       args.push('-c:v', 'copy');
     }
@@ -340,16 +343,16 @@ function runFFmpegBurn(task, inputPath, outputPath, subPath) {
       const esc = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
       const ext = path.extname(subPath).toLowerCase();
       const vf = `scale=1280:720,${ext === '.ass' ? `ass='${esc}'` : `subtitles='${esc}'`}`;
-      args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '28');
+      args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28');
     } else if (task.compress) {
-      args.push('-vf', 'scale=1280:720', '-c:v', 'libx264', '-preset', 'fast', '-crf', '28');
+      args.push('-vf', 'scale=1280:720', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28');
     } else if (subPath) {
       const esc = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
       const ext = path.extname(subPath).toLowerCase();
       const vf = ext === '.ass'
         ? `ass='${esc}'`
         : `subtitles='${esc}':force_style='FontName=Noto Sans Bengali,FontSize=20,PrimaryColour=&H00FFFFFF'`;
-      args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23');
+      args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23');
     }
     args.push('-c:a', 'copy', outputPath);
 
@@ -445,8 +448,100 @@ asyncio.run(main())
   });
 }
 
+
+// Download Bengali fonts and setup
+async function setupFonts() {
+  const fontDir = '/tmp/fonts';
+  if (!fs.existsSync(fontDir)) fs.mkdirSync(fontDir, { recursive: true });
+  const fontPath = `${fontDir}/NotoSansBengali.ttf`;
+  if (!fs.existsSync(fontPath)) {
+    const https = require('https');
+    await new Promise((res, rej) => {
+      const file = fs.createWriteStream(fontPath);
+      https.get('https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansBengali/NotoSansBengali-Regular.ttf', r => {
+        r.pipe(file);
+        file.on('finish', () => { file.close(); res(); });
+      }).on('error', rej);
+    });
+    const { execSync } = require('child_process');
+    try { execSync('fc-cache -fv /tmp/fonts'); } catch {}
+    console.log('✓ Bengali font downloaded');
+  }
+}
+
+// Convert SRT/VTT to ASS with Netflix-style Bengali subtitle
+function convertToAss(inputPath, assPath, task) {
+  return new Promise((resolve, reject) => {
+    // First use ffmpeg to convert
+    const ff = spawn('ffmpeg', ['-y', '-i', inputPath, assPath]);
+    let done = false;
+    ff.on('close', code => {
+      if (code === 0 && fs.existsSync(assPath)) {
+        // Apply Netflix style to ASS
+        applyAssStyle(assPath, task);
+        done = true;
+        resolve();
+      } else {
+        // Manual SRT→ASS fallback
+        try {
+          srtToAssManual(inputPath, assPath);
+          resolve();
+        } catch(e) { reject(e); }
+      }
+    });
+    ff.on('error', () => {
+      try { srtToAssManual(inputPath, assPath); resolve(); } catch(e) { reject(e); }
+    });
+  });
+}
+
+function applyAssStyle(assPath) {
+  try {
+    let content = fs.readFileSync(assPath, 'utf8');
+    const newStyle = 'Style: Default,Noto Sans Bengali,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,1,0,2,20,20,25,1';
+    content = content.replace(/Style: Default,[^\n]+/, newStyle);
+    // Ensure fontsdir hint
+    if (!content.includes('WrapStyle')) {
+      content = content.replace('[Script Info]', '[Script Info]\nWrapStyle: 0');
+    }
+    fs.writeFileSync(assPath, content, 'utf8');
+  } catch(e) { console.error('applyAssStyle error:', e); }
+}
+
+function srtToAssManual(srtPath, assPath, task) {
+  const srt = fs.readFileSync(srtPath, 'utf8').trim();
+  const header = `[Script Info]
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Sans Bengali,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,1,0,2,20,20,25,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  const toAssTime = t => t.trim().replace(',', '.').split(':').map((v,i) => i===2 ? v : v.padStart(2,'0')).join(':');
+  const blocks = srt.split(/\n\s*\n/);
+  const events = [];
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    if (lines.length < 3) continue;
+    try {
+      const [start, end] = lines[1].split(' --> ');
+      const text = lines.slice(2).join('\\N').replace(/<[^>]+>/g, '');
+      events.push(`Dialogue: 0,${toAssTime(start)},${toAssTime(end)},Default,,0,0,0,,${text}`);
+    } catch {}
+  }
+  fs.writeFileSync(assPath, header + events.join('\n'), 'utf8');
+}
+
 // ========== BOOT ==========
 loadQueue();
+setupFonts().catch(e => console.error("Font setup failed:", e));
 app.listen(PORT, () => {
   console.log(`🚀 KDrama Uploader on port ${PORT}`);
   exec('ffmpeg -version 2>&1 | head -1', (e, out) => console.log(e ? '❌ ffmpeg missing' : '✓ ' + out.trim()));
