@@ -167,73 +167,113 @@ async function processNext() {
 }
 
 async function processTask(task) {
+  const rawPath = path.join(TEMP_DIR, `raw_${task.id}.mp4`);
   const outputPath = path.join(TEMP_DIR, `output_${task.id}.mp4`);
   let subPath = null;
 
   try {
-    // Prepare subtitle path
+    // Prepare subtitle
     if (task.subFile && fs.existsSync(task.subFile.path)) {
       const ext = task.subFile.name.split('.').pop().toLowerCase();
       subPath = task.subFile.path + '.' + ext;
       fs.renameSync(task.subFile.path, subPath);
     }
 
-    // Step 1: ffmpeg
-    log(task.id, '⚙️ ffmpeg শুরু হচ্ছে...');
-    await runFFmpeg(task, outputPath, subPath);
+    // Step 1: yt-dlp download
+    log(task.id, '⬇️ yt-dlp দিয়ে download হচ্ছে...');
+    await runYtDlp(task, rawPath);
+
+    const rawSize = fs.statSync(rawPath).size;
+    log(task.id, `✅ Download হয়েছে! ${(rawSize/1024/1024).toFixed(1)}MB`);
+    setStatus(task.id, 'processing', { progress: 50 });
+
+    // Step 2: ffmpeg subtitle burn or compress
+    if (subPath || task.compress) {
+      log(task.id, '🎬 Processing হচ্ছে...');
+      await runFFmpegBurn(task, rawPath, outputPath, subPath);
+      try { fs.unlinkSync(rawPath); } catch {}
+    } else {
+      fs.renameSync(rawPath, outputPath);
+      log(task.id, '⏭ Subtitle নেই, compress নেই — সরাসরি upload');
+    }
 
     const fileSize = fs.statSync(outputPath).size;
     log(task.id, `✅ Video ready! ${(fileSize/1024/1024).toFixed(1)}MB`);
     setStatus(task.id, 'processing', { progress: 80 });
 
-    // Step 2: Telethon upload
+    // Step 3: Telethon upload
     log(task.id, '📤 Telegram upload শুরু...');
     await uploadWithTelethon(task, outputPath);
-
     setStatus(task.id, 'processing', { progress: 95 });
 
   } finally {
-    // Cleanup
-    [outputPath, subPath, task.subFile?.path].forEach(f => {
+    [rawPath, outputPath, subPath, task.subFile?.path].forEach(f => {
       if (f && fs.existsSync(f)) { try { fs.unlinkSync(f); } catch {} }
     });
   }
 }
 
-function runFFmpeg(task, outputPath, subPath) {
+// yt-dlp download
+function runYtDlp(task, outputPath) {
   return new Promise((resolve, reject) => {
     const args = [
-      '-y',
-      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,hls',
-      '-allowed_extensions', 'ALL',
-      '-i', task.m3u8Url,
+      '--no-warnings',
+      '--format', 'bestvideo+bestaudio/best',
+      '--merge-output-format', 'mp4',
+      '--concurrent-fragments', '10',
+      '--buffer-size', '16K',
+      '--http-chunk-size', '10M',
+      '--retries', '10',
+      '--fragment-retries', '10',
+      '-o', outputPath,
+      task.m3u8Url,
     ];
-    // Video codec
+
+    log(task.id, '▶ yt-dlp ' + args.join(' ').substring(0, 80) + '...');
+    const ytdlp = spawn('yt-dlp', args);
+
+    ytdlp.stdout.on('data', data => {
+      const line = data.toString().trim();
+      if (line) log(task.id, line);
+    });
+
+    ytdlp.stderr.on('data', data => {
+      const line = data.toString().trim();
+      if (line) log(task.id, '⚠️ ' + line, 'err');
+    });
+
+    ytdlp.on('close', code => {
+      if (code === 0 && fs.existsSync(outputPath)) resolve();
+      else reject(new Error(`yt-dlp exit code ${code}`));
+    });
+
+    ytdlp.on('error', e => reject(new Error('yt-dlp not found: ' + e.message)));
+  });
+}
+
+// ffmpeg subtitle burn / compress
+function runFFmpegBurn(task, inputPath, outputPath, subPath) {
+  return new Promise((resolve, reject) => {
+    const args = ['-y', '-i', inputPath];
+
     if (task.compress) {
-      args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '28', '-vf');
       let vf = 'scale=1280:720';
       if (subPath) {
         const ext = path.extname(subPath).toLowerCase();
-        const escapedSub = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
-        vf += ext === '.ass' ? `,ass='${escapedSub}'` : `,subtitles='${escapedSub}':force_style='FontName=Noto Sans Bengali,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,MarginV=25'`;
+        const esc = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+        vf += ext === '.ass' ? `,ass='${esc}'` : `,subtitles='${esc}':force_style='FontName=Noto Sans Bengali,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,MarginV=25'`;
       }
-      args.push(vf);
-    } else {
-      if (subPath) {
-        const ext = path.extname(subPath).toLowerCase();
-        const escapedSub = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
-        const vf = ext === '.ass'
-          ? `ass='${escapedSub}'`
-          : `subtitles='${escapedSub}':force_style='FontName=Noto Sans Bengali,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,MarginV=25'`;
-        args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23');
-      } else {
-        args.push('-c:v', 'copy');
-      }
+      args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '28');
+    } else if (subPath) {
+      const ext = path.extname(subPath).toLowerCase();
+      const esc = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+      const vf = ext === '.ass'
+        ? `ass='${esc}'`
+        : `subtitles='${esc}':force_style='FontName=Noto Sans Bengali,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,MarginV=25'`;
+      args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23');
     }
 
-    args.push('-c:a', 'aac', '-b:a', '128k', outputPath);
-
-    log(task.id, '📥 Download + burn: ' + args.join(' ').substring(0, 100) + '...');
+    args.push('-c:a', 'copy', outputPath);
 
     const ff = spawn('ffmpeg', args);
     let duration = 0;
@@ -241,37 +281,27 @@ function runFFmpeg(task, outputPath, subPath) {
 
     ff.stderr.on('data', data => {
       const line = data.toString();
-
       const durMatch = line.match(/Duration:\s*(\d+):(\d+):(\d+)/);
       if (durMatch) {
         duration = parseInt(durMatch[1])*3600 + parseInt(durMatch[2])*60 + parseInt(durMatch[3]);
-        log(task.id, `⏱ Duration: ${durMatch[0].replace('Duration: ','')}`);
       }
-
       const timeMatch = line.match(/time=(\d+):(\d+):(\d+)/);
       if (timeMatch && duration > 0) {
         const cur = parseInt(timeMatch[1])*3600 + parseInt(timeMatch[2])*60 + parseInt(timeMatch[3]);
-        const pct = Math.min(78, Math.floor((cur/duration)*78));
+        const pct = Math.min(28, Math.floor((cur/duration)*28));
         if (pct >= lastPct + 5) {
           lastPct = pct;
-          const timeStr = `${timeMatch[1]}:${timeMatch[2]}:${timeMatch[3]}`;
-          log(task.id, `⏳ ${pct}% — ${timeStr} / ${Math.floor(duration/3600)}:${String(Math.floor((duration%3600)/60)).padStart(2,'0')}:${String(duration%60).padStart(2,'0')}`);
-          setStatus(task.id, 'processing', { progress: pct });
+          log(task.id, `🎬 Burn ${50+pct}% — ${timeMatch[1]}:${timeMatch[2]}:${timeMatch[3]}`);
+          setStatus(task.id, 'processing', { progress: 50+pct });
         }
-      }
-
-      // Log errors
-      if (line.includes('Error') || line.includes('error') || line.includes('Invalid')) {
-        log(task.id, '⚠️ ffmpeg: ' + line.trim(), 'err');
       }
     });
 
     ff.on('close', code => {
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exit code ${code}`));
+      else reject(new Error(`ffmpeg burn exit code ${code}`));
     });
-
-    ff.on('error', e => reject(new Error('ffmpeg spawn failed: ' + e.message)));
+    ff.on('error', e => reject(new Error('ffmpeg failed: ' + e.message)));
   });
 }
 
