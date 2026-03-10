@@ -202,8 +202,12 @@ async function processTask(task) {
 
 function runFFmpeg(task, outputPath, subPath) {
   return new Promise((resolve, reject) => {
-    const args = ['-y', '-i', task.m3u8Url];
-
+    const args = [
+      '-y',
+      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,hls',
+      '-allowed_extensions', 'ALL',
+      '-i', task.m3u8Url,
+    ];
     // Video codec
     if (task.compress) {
       args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '28', '-vf');
