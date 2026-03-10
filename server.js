@@ -495,35 +495,48 @@ function convertToAss(inputPath, assPath, task) {
   });
 }
 
-function applyAssStyle(assPath) {
+function buildAssStyle(task) {
+  const sz = (task && task.subFontSize) || 22;
+  const colorMap = { white: '&H00FFFFFF', yellow: '&H0000FFFF', cyan: '&H00FFFF00' };
+  const col = colorMap[(task && task.subColor) || 'white'] || '&H00FFFFFF';
+  const bgMap = { semi: '&H80000000', black: '&H00000000', none: '&H00000000' };
+  const bg = bgMap[(task && task.subBg) || 'semi'] || '&H80000000';
+  const bstyle = (task && task.subBg === 'none') ? 1 : 3;
+  const alignMap = { bottom: 2, middle: 5, top: 8 };
+  const align = alignMap[(task && task.subPosition) || 'bottom'] || 2;
+  const bold = (task && task.subBold) ? -1 : 0;
+  const italic = (task && task.subItalic) ? -1 : 0;
+  return `Style: Default,Noto Sans Bengali,${sz},${col},&H000000FF,&H00000000,${bg},${bold},${italic},0,0,100,100,0,0,${bstyle},1,0,${align},20,20,25,1`;
+}
+
+function applyAssStyle(assPath, task) {
   try {
-    let content = fs.readFileSync(assPath, 'utf8');
-    const newStyle = 'Style: Default,Noto Sans Bengali,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,1,0,2,20,20,25,1';
-    content = content.replace(/Style: Default,[^\n]+/, newStyle);
-    // Ensure fontsdir hint
-    if (!content.includes('WrapStyle')) {
-      content = content.replace('[Script Info]', '[Script Info]\nWrapStyle: 0');
-    }
-    fs.writeFileSync(assPath, content, 'utf8');
+    let c = fs.readFileSync(assPath, 'utf8');
+    c = c.replace(/Style: Default,[^\n]+/, buildAssStyle(task));
+    if (!c.includes('WrapStyle')) c = c.replace('[Script Info]', '[Script Info]\nWrapStyle: 0');
+    fs.writeFileSync(assPath, c, 'utf8');
   } catch(e) { console.error('applyAssStyle error:', e); }
 }
 
 function srtToAssManual(srtPath, assPath, task) {
   const srt = fs.readFileSync(srtPath, 'utf8').trim();
-  const header = `[Script Info]
-ScriptType: v4.00+
-PlayResX: 1280
-PlayResY: 720
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Noto Sans Bengali,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,1,0,2,20,20,25,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`;
+  const styleLine = buildAssStyle(task);
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'PlayResX: 1280',
+    'PlayResY: 720',
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    styleLine,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    ''
+  ].join('\n');
   const toAssTime = t => t.trim().replace(',', '.').split(':').map((v,i) => i===2 ? v : v.padStart(2,'0')).join(':');
   const blocks = srt.split(/\n\s*\n/);
   const events = [];
@@ -532,8 +545,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if (lines.length < 3) continue;
     try {
       const [start, end] = lines[1].split(' --> ');
-      const text = lines.slice(2).join('\\N').replace(/<[^>]+>/g, '');
-      events.push(`Dialogue: 0,${toAssTime(start)},${toAssTime(end)},Default,,0,0,0,,${text}`);
+      const text = lines.slice(2).join('{\\N}').replace(/<[^>]+>/g, '');
+      events.push('Dialogue: 0,' + toAssTime(start) + ',' + toAssTime(end) + ',Default,,0,0,0,,' + text);
     } catch {}
   }
   fs.writeFileSync(assPath, header + events.join('\n'), 'utf8');
