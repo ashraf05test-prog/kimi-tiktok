@@ -215,7 +215,7 @@ function runFFmpegDirect(task, outputPath, subPath) {
     } else {
       args.push('-c:v', 'copy');
     }
-    args.push('-c:a', 'aac', '-max_muxing_queue_size', '1024', outputPath);
+    args.push('-map', '0', '-c:a', 'aac', '-max_muxing_queue_size', '1024', outputPath);
 
     log(task.id, `▶ ffmpeg ${vfFilter ? 'burn+encode' : 'stream copy'}`);
     log(task.id, `▶ CMD: ffmpeg ${args.join(' ')}`);
