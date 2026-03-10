@@ -213,15 +213,12 @@ function runFFmpegDirect(task, outputPath, subPath) {
 
     const args = [
       '-y',
+      '-allowed_extensions', 'ALL',
+      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,hls',
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       '-headers', `Referer: ${referer}\r\nOrigin: ${urlObj.origin}\r\n`,
-      '-allowed_extensions', 'ALL',
-      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+      '-i', task.m3u8Url,
     ];
-    if (hasCookies) {
-      args.push('-cookies', fs.readFileSync(cookiePath, 'utf8'));
-    }
-    args.push('-i', task.m3u8Url);
 
     if (vfFilter) {
       args.push('-vf', vfFilter, '-c:v', 'libx264', '-preset', 'fast', '-crf', task.compress ? '28' : '23');
